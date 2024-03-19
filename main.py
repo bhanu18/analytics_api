@@ -6,7 +6,8 @@ from os.path import join, dirname
 from dotenv import load_dotenv
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
-import base64 
+import base64
+import uvicorn
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="some-random-string")
@@ -16,6 +17,7 @@ load_dotenv(dotenv_path)
 
 client_id = os.environ.get("clientid")
 client_secret = os.environ.get("clientsecret")
+redirect_uri = "http://127.0.0.1:8000/callback"
 
 
 @app.middleware("http")
@@ -38,32 +40,53 @@ def read_root():
 def requesttoken(request: Request, code: str = "", state: str = ""):
 
     if state != None:
-        redirectTo = "http://127.0.0.1:8000/callback"
         # Form the payload data
-        payload = {"grant_type": "authorization_code", "code": code, "redirect": redirectTo}
+        payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+        }
 
-        token = client_id + ":" + client_secret
-        token_string = token.encode("ascii")
-        token_bytes = base64.b64encode(token_string) 
-        base64_string = token_bytes.decode("ascii")
-        
-        # Set the headers
-        headers = {"Content-Type": "application/x-www-form-urlencoded", "Authorization": "Basic " + base64_string}
-        
-        response = requests.post(
-            "https://accounts.spotify.com/api/token", data=payload, headers=headers
+        access_token = base64.urlsafe_b64encode(
+            (client_id + ":" + client_secret).encode()
         )
 
-        return str(response)
-        # if response.status_code == 200:
-        #     response_data = response.json()
-        #     access_token = response_data.get("access_token")
-        #     request.session["access_token"] = access_token
-        #     return RedirectResponse('/me')
-        # else:
-        #     return {'status': "Not sure"}
+        response = requests.post(
+            "https://accounts.spotify.com/api/token",
+            data=payload,
+            auth=(client_id, client_secret),
+        )
+
+        # return str(response)
+        if response.status_code == 200:
+            response_data = response.json()
+            access_token = response_data.get("access_token")
+            request.session["access_token"] = access_token
+            return RedirectResponse("/me")
+        else:
+            return {"status": "Not sure"}
     else:
-        return RedirectResponse('/')
+        return RedirectResponse("/")
+
+
+@app.get("/login")
+def login_spotify():
+    scope = "user-read-private user-read-email"
+    state = "ahkjasfdkfureertfknf"
+
+    return RedirectResponse(
+        "https://accounts.spotify.com/authorize?"
+        + "response_type="
+        + "code"
+        + "&client_id="
+        + client_id
+        + "&scope="
+        + scope
+        + "&redirect_uri="
+        + redirect_uri
+        + "&state="
+        + state
+    )
 
 
 @app.get("/artist")
@@ -96,27 +119,29 @@ def getuserdata(request: Request):
     response = requests.get(url, headers=header)
 
     if response.status_code == 200:
-        return {"status": True, "data": str(response)}
+        response_data = response.json()
+        return {"status": True, "data": str(response_data)}
     else:
         return {"status": False}
 
 
-@app.get("/login")
-def login_spotify():
-    scope = "user-read-private user-read-email"
-    redirect_uri = "http://127.0.0.1:8000/callback"
-    state = "ahkjasfdkfureertfknf"
+@app.get("/mydata")
+def gettopdata(request: Request):
 
-    return RedirectResponse(
-        "https://accounts.spotify.com/authorize?"
-        + "response_type="
-        + "code"
-        + "&client_id="
-        + client_id
-        + "&scope="
-        + scope
-        + "&redirect_uri="
-        + redirect_uri
-        + "&state="
-        + state
-    )
+    bearer_token = request.session.get("access_token")
+
+    url = "https://api.spotify.com/v1/me/top/artists"
+
+    header = {"Authorization": "Bearer " + bearer_token}
+
+    response = requests.get(url, headers=header)
+
+    if response.status_code == 200:
+        response_data = response.json()
+        return {"status": True, "data": str(response_data)}
+    else:
+        return {"status": False}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, debug=True)
