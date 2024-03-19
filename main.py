@@ -57,12 +57,12 @@ def requesttoken(request: Request, code: str = "", state: str = ""):
             auth=(client_id, client_secret),
         )
 
-        # return str(response)
         if response.status_code == 200:
             response_data = response.json()
             access_token = response_data.get("access_token")
             request.session["access_token"] = access_token
-            return RedirectResponse("/me")
+            # return RedirectResponse("/me")
+            return str(response_data)
         else:
             return {"status": "Not sure"}
     else:
@@ -71,7 +71,7 @@ def requesttoken(request: Request, code: str = "", state: str = ""):
 
 @app.get("/login")
 def login_spotify():
-    scope = "user-read-private user-read-email"
+    scope = "user-read-private user-read-email playlist-read-private playlist-read-collaborative user-library-read"
     state = "ahkjasfdkfureertfknf"
 
     return RedirectResponse(
@@ -125,12 +125,12 @@ def getuserdata(request: Request):
         return {"status": False}
 
 
-@app.get("/mydata")
+@app.get("/mytracks")
 def gettopdata(request: Request):
 
     bearer_token = request.session.get("access_token")
 
-    url = "https://api.spotify.com/v1/me/top/artists"
+    url = "https://api.spotify.com/v1/me/tracks"
 
     header = {"Authorization": "Bearer " + bearer_token}
 
