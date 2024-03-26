@@ -62,7 +62,7 @@ def requesttoken(request: Request, code: str = "", state: str = ""):
             access_token = response_data.get("access_token")
             request.session["access_token"] = access_token
             # return RedirectResponse("/me")
-            return str(response_data)
+            return {"status": True, "data": response_data}
         else:
             return {"status": "Not sure"}
     else:
