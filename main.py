@@ -120,7 +120,7 @@ def getuserdata(request: Request):
 
     if response.status_code == 200:
         response_data = response.json()
-        return {"status": True, "data": str(response_data)}
+        return {"status": True, "data": response_data}
     else:
         return {"status": False}
 
@@ -128,9 +128,10 @@ def getuserdata(request: Request):
 @app.get("/mytracks")
 def gettopdata(request: Request):
 
+    tracks = []
     bearer_token = request.session.get("access_token")
 
-    url = "https://api.spotify.com/v1/me/tracks"
+    url = "https://api.spotify.com/v1/me/tracks?market=TH"
 
     header = {"Authorization": "Bearer " + bearer_token}
 
@@ -138,7 +139,10 @@ def gettopdata(request: Request):
 
     if response.status_code == 200:
         response_data = response.json()
-        return {"status": True, "data": str(response_data)}
+
+        for i in response_data['items']:
+            tracks.append(i['track']['name'])
+        return {"status": True, "data": tracks}
     else:
         return {"status": False}
 
