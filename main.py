@@ -61,8 +61,8 @@ def requesttoken(request: Request, code: str = "", state: str = ""):
             response_data = response.json()
             access_token = response_data.get("access_token")
             request.session["access_token"] = access_token
-            # return RedirectResponse("/me")
-            return {"status": True, "data": response_data}
+            return RedirectResponse("/me")
+            # return {"status": True, "data": response_data}
         else:
             return {"status": "Not sure"}
     else:
@@ -128,7 +128,7 @@ def getuserdata(request: Request):
 @app.get("/mytracks")
 def gettopdata(request: Request):
 
-    tracks = []
+    tracks = {}
     bearer_token = request.session.get("access_token")
 
     url = "https://api.spotify.com/v1/me/tracks?market=TH"
@@ -141,8 +141,37 @@ def gettopdata(request: Request):
         response_data = response.json()
 
         for i in response_data['items']:
-            tracks.append(i['track']['name'])
-        return {"status": True, "data": tracks}
+            tracks[i['track']['name']] = i['track']['href'] 
+        return {
+            "status": True, 
+            "data": tracks,
+            "offset": response_data['offset']
+        }
+    else:
+        return {"status": False}
+
+@app.get("/myartist")
+def gettopdata(request: Request):
+
+    tracks = {}
+    bearer_token = request.session.get("access_token")
+
+    url = "https://api.spotify.com/v1/me/top/artists"
+
+    header = {"Authorization": "Bearer " + bearer_token}
+
+    response = requests.get(url, headers=header)
+
+    if response.status_code == 200:
+        response_data = response.json()
+
+        for i in response_data['items']:
+            tracks[i['name']] = i['url'] 
+        return {
+            "status": True, 
+            "data": tracks,
+            "offset": response_data['offset']
+        }
     else:
         return {"status": False}
 
