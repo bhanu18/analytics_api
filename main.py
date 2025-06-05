@@ -8,7 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
 import base64
 import uvicorn
-
+import model.Item
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="some-random-string")
 
@@ -62,7 +62,6 @@ def requesttoken(request: Request, code: str = "", state: str = ""):
             access_token = response_data.get("access_token")
             request.session["access_token"] = access_token
             return RedirectResponse("/me")
-            # return {"status": True, "data": response_data}
         else:
             return {"status": "Not sure"}
     else:
