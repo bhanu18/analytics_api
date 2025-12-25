@@ -1,12 +1,12 @@
-from typing import Union
-from fastapi import FastAPI, Request
-import requests
+from typing import Union, Optional
+from fastapi import FastAPI, Request, Query
+import httpx
 import os
 from os.path import join, dirname
 from dotenv import load_dotenv
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import RedirectResponse
-import base64
+from urllib.parse import urlencode
 import uvicorn
 import model.Item
 app = FastAPI()
@@ -18,6 +18,9 @@ load_dotenv(dotenv_path)
 client_id = os.environ.get("clientid")
 client_secret = os.environ.get("clientsecret")
 redirect_uri = "http://127.0.0.1:8000/callback"
+
+# HTTP timeout in seconds for external API calls
+HTTP_TIMEOUT = 10.0
 
 
 @app.middleware("http")
@@ -37,9 +40,9 @@ def read_root():
 
 
 @app.get("/callback")
-def requesttoken(request: Request, code: str = "", state: str = ""):
+async def requesttoken(request: Request, code: str = "", state: str = ""):
 
-    if state != None:
+    if state:
         # Form the payload data
         payload = {
             "grant_type": "authorization_code",
@@ -47,15 +50,12 @@ def requesttoken(request: Request, code: str = "", state: str = ""):
             "redirect_uri": redirect_uri,
         }
 
-        access_token = base64.urlsafe_b64encode(
-            (client_id + ":" + client_secret).encode()
-        )
-
-        response = requests.post(
-            "https://accounts.spotify.com/api/token",
-            data=payload,
-            auth=(client_id, client_secret),
-        )
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                "https://accounts.spotify.com/api/token",
+                data=payload,
+                auth=(client_id, client_secret),
+            )
 
         if response.status_code == 200:
             response_data = response.json()
@@ -73,49 +73,47 @@ def login_spotify():
     scope = "user-read-private user-read-email playlist-read-private playlist-read-collaborative user-library-read"
     state = "ahkjasfdkfureertfknf"
 
-    return RedirectResponse(
-        "https://accounts.spotify.com/authorize?"
-        + "response_type="
-        + "code"
-        + "&client_id="
-        + client_id
-        + "&scope="
-        + scope
-        + "&redirect_uri="
-        + redirect_uri
-        + "&state="
-        + state
-    )
+    params = urlencode({
+        "response_type": "code",
+        "client_id": client_id,
+        "scope": scope,
+        "redirect_uri": redirect_uri,
+        "state": state
+    })
+
+    return RedirectResponse(f"https://accounts.spotify.com/authorize?{params}")
 
 
 @app.get("/artist")
-def getartist(request: Request):
+async def getartist(request: Request):
 
     url = "https://api.spotify.com/v1/artists/2tIP7SsRs7vjIcLrU85W8J"
 
     bearer_token = request.session.get("access_token")
 
-    header = {"Authorization": "Bearer " + bearer_token}
+    header = {"Authorization": f"Bearer {bearer_token}"}
 
-    response = requests.get(url, headers=header)
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(url, headers=header)
 
     if response.status_code == 200:
         response_data = response.json()
-        return {"status": True, "data": str(response_data)}
+        return {"status": True, "data": response_data}
     else:
         return {"status": False}
 
 
 @app.get("/me")
-def getuserdata(request: Request):
+async def getuserdata(request: Request):
 
     bearer_token = request.session.get("access_token")
 
     url = "https://api.spotify.com/v1/me"
 
-    header = {"Authorization": "Bearer " + bearer_token}
+    header = {"Authorization": f"Bearer {bearer_token}"}
 
-    response = requests.get(url, headers=header)
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(url, headers=header)
 
     if response.status_code == 200:
         response_data = response.json()
@@ -125,51 +123,84 @@ def getuserdata(request: Request):
 
 
 @app.get("/mytracks")
-def gettopdata(request: Request):
+async def gettopdata(
+    request: Request,
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0)
+):
 
-    tracks = {}
     bearer_token = request.session.get("access_token")
 
-    url = "https://api.spotify.com/v1/me/tracks?market=TH"
+    params = urlencode({
+        "market": "TH",
+        "limit": limit,
+        "offset": offset
+    })
+    url = f"https://api.spotify.com/v1/me/tracks?{params}"
 
-    header = {"Authorization": "Bearer " + bearer_token}
+    header = {"Authorization": f"Bearer {bearer_token}"}
 
-    response = requests.get(url, headers=header)
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(url, headers=header)
 
     if response.status_code == 200:
         response_data = response.json()
 
-        for i in response_data['items']:
-            tracks[i['track']['name']] = i['track']['href'] 
+        # Use dict comprehension for better performance
+        tracks = {
+            item['track']['name']: item['track']['href']
+            for item in response_data['items']
+        }
+
         return {
-            "status": True, 
+            "status": True,
             "data": tracks,
-            "offset": response_data['offset']
+            "offset": response_data.get('offset', 0),
+            "limit": response_data.get('limit', limit),
+            "total": response_data.get('total', 0),
+            "next": response_data.get('next')
         }
     else:
         return {"status": False}
 
 @app.get("/myartist")
-def gettopdata(request: Request):
+async def gettopartists(
+    request: Request,
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    time_range: str = Query("medium_term", regex="^(short_term|medium_term|long_term)$")
+):
 
-    tracks = {}
     bearer_token = request.session.get("access_token")
 
-    url = "https://api.spotify.com/v1/me/top/artists"
+    params = urlencode({
+        "limit": limit,
+        "offset": offset,
+        "time_range": time_range
+    })
+    url = f"https://api.spotify.com/v1/me/top/artists?{params}"
 
-    header = {"Authorization": "Bearer " + bearer_token}
+    header = {"Authorization": f"Bearer {bearer_token}"}
 
-    response = requests.get(url, headers=header)
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        response = await client.get(url, headers=header)
 
     if response.status_code == 200:
         response_data = response.json()
 
-        for i in response_data['items']:
-            tracks[i['name']] = i['url'] 
+        # Use dict comprehension for better performance
+        artists = {
+            item['name']: item.get('external_urls', {}).get('spotify', '')
+            for item in response_data['items']
+        }
+
         return {
-            "status": True, 
-            "data": tracks,
-            "offset": response_data['offset']
+            "status": True,
+            "data": artists,
+            "offset": response_data.get('offset', 0),
+            "limit": response_data.get('limit', limit),
+            "total": response_data.get('total', 0),
+            "next": response_data.get('next')
         }
     else:
         return {"status": False}
